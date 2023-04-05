@@ -3,7 +3,6 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.*
 import okhttp3.*
 import okhttp3.logging.HttpLoggingInterceptor
-import ru.netology.coroutines.dto.*
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.EmptyCoroutineContext
@@ -11,66 +10,152 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
-fun main(args: Array<String>) {
-    CoroutineScope(EmptyCoroutineContext).launch {
-        val postWithComments: List<PostWithComments> = getPosts().map {
-            PostWithComments(it, getComments(it.id))
+/**БЛОК 1*/
+//ЗАДАНИЕ 1
+suspend fun main1() = runBlocking {
+    val job = CoroutineScope(EmptyCoroutineContext).launch {
+        launch {
+            delay(500)
+            println("1 line") // <-- NO отменяем(25) до того, как выведем.
         }
-        val postWithCommentsAndAuthors: List<PostWithCommentsAndAuthors> = postWithComments.map {
-            PostWithCommentsAndAuthors(PostWithAuthor(it.post, getAuthor(it.post.authorId)), it.comments)
+        launch {
+            delay(500)
+            println("2 line")
         }
-        println(postWithCommentsAndAuthors)
     }
-    Thread.sleep(5000)
+    delay(100)
+    job.cancelAndJoin()
 }
 
+//ЗАДАНИЕ 2
+fun main2() = runBlocking {
+    val job = CoroutineScope(EmptyCoroutineContext).launch {
+        val child = launch {
+            delay(500)
+            println("1 line") // <-- NO отменяем(39) до того, как выведем.
+        }
+        launch {
+            delay(500)
+            println("2 line")
+        }
+        delay(100)
+        child.cancel()
+    }
+    delay(100)
+    job.join()
+}
 
-
-private const val BASE_URL = "http://127.0.0.1:10999/api/slow"
-private val gson = Gson()
-private val client = OkHttpClient.Builder()
-    .connectTimeout(30, TimeUnit.SECONDS)
-    .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY })
-    .build()
-
-
-
-private suspend fun getPosts(): List<Post> = makeRequest("$BASE_URL/posts", client, object : TypeToken<List<Post>>() {})
-private suspend fun getComments(postId: Long): List<Comment> =
-    makeRequest("$BASE_URL/posts/$postId/comments", client, object : TypeToken<List<Comment>>() {})
-
-private suspend fun getAuthor(authorId: Long): Author =
-    makeRequest("$BASE_URL/authors/$authorId", client, object : TypeToken<Author>() {})
-
-suspend fun <T> makeRequest(url: String, client: OkHttpClient, typeToken: TypeToken<T>): T =
-    withContext(Dispatchers.IO) {
-        client.apiCall(url)
-            .let { response ->
-                if (!response.isSuccessful) {
-                    response.close()
-                    throw RuntimeException(response.message)
-                }
-                val body = response.body ?: throw RuntimeException("response body is null")
-                gson.fromJson(body.string(), typeToken.type)
+/**БЛОК 2*/
+//ЗАДАНИЕ 1
+fun main3() {
+    with(CoroutineScope(EmptyCoroutineContext)) {
+        try {
+            launch {
+                throw Exception("Line 1")
             }
+        } catch (e: Exception) {
+            e.printStackTrace() // <-- NO, отрабатывает карутина (54)
+        }
     }
+    Thread.sleep(1000)
+}
 
-
-
-suspend fun OkHttpClient.apiCall(url: String): Response {
-    return suspendCoroutine { continuation ->
-        Request.Builder()
-            .url(url)
-            .build()
-            .let(::newCall)
-            .enqueue(object : Callback {
-                override fun onResponse(call: Call, response: Response) {
-                    continuation.resume(response)
-                }
-
-                override fun onFailure(call: Call, e: IOException) {
-                    continuation.resumeWithException(e)
-                }
-            })
+//ЗАДАНИЕ 2
+fun main4() {
+    CoroutineScope(EmptyCoroutineContext).launch {
+        try {
+            coroutineScope {
+                throw Exception("Line 1")
+            }
+        } catch (e: Exception) {
+            e.printStackTrace() // <-- NO, отрабатывает карутина (68)
+        }
     }
+    Thread.sleep(1000)
+}
+
+//ЗАДАНИЕ 3
+fun main5() {
+    CoroutineScope(EmptyCoroutineContext).launch {
+        try {
+            supervisorScope {
+                throw Exception("Line 1")
+            }
+        } catch (e: Exception) {
+            e.printStackTrace() // <-- NO, отрабатывает карутина (82)
+        }
+    }
+    Thread.sleep(1000)
+}
+
+fun main6() {
+    CoroutineScope(EmptyCoroutineContext).launch {
+        try {
+            coroutineScope {
+                launch {
+                    delay(500)
+                    throw Exception("Line 1") // <-- NO, тк мы ждём (96), первой успевает отработать карутина (100) и выкинуть ошибку
+                }
+                launch {
+                    throw Exception("Line 2")
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+    Thread.sleep(1000)
+}
+
+fun main7() {
+    CoroutineScope(EmptyCoroutineContext).launch {
+        try {
+            supervisorScope {
+                launch {
+                    delay(500)
+                    throw Exception("1 Line") // <-- YES, дожидаемся завершения карутины
+                }
+                launch {
+                    throw Exception("2 Line")
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace() // <--
+        }
+    }
+    Thread.sleep(1000)
+}
+
+fun main9() {
+    CoroutineScope(EmptyCoroutineContext).launch {
+        CoroutineScope(EmptyCoroutineContext).launch {
+            launch {
+                delay(1000)
+                println("Line 1") // <-- NO, выкинули исключение(140) до завершения карутины
+            }
+            launch {
+                delay(500)
+                println("Line 2")
+            }
+            throw Exception("something bad happened")
+        }
+    }
+    Thread.sleep(1000)
+}
+
+fun main() {
+    CoroutineScope(EmptyCoroutineContext).launch {
+        CoroutineScope(EmptyCoroutineContext + SupervisorJob()).launch {
+            launch {
+                delay(1000)
+                println("Line 1") // <-- NO, выкидываем исключение(157) до завершения карутин
+            }
+            launch {
+                delay(500)
+                println("Line 2")
+            }
+            throw Exception("something bad happened")
+        }
+    }
+    Thread.sleep(1000)
 }
